@@ -53,7 +53,7 @@ pub fn obscured_str(obj: &Il2CppObject) -> Option<String> {
         .collect();
 
     // Convert UTF-16LE bytes → Rust String
-    if decrypted.len() % 2 != 0 {
+    if !decrypted.len().is_multiple_of(2) {
         log::warn!("obscured_str: odd decrypted length {}", decrypted.len());
         return None;
     }
@@ -75,10 +75,7 @@ pub fn obscured_encrypt(obj: &Il2CppObject, text: &str) -> Option<Il2CppArray<u8
         return None;
     }
 
-    let plain: Vec<u8> = text
-        .encode_utf16()
-        .flat_map(|c| c.to_le_bytes())
-        .collect();
+    let plain: Vec<u8> = text.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
 
     let byte_class = Il2CppClass::find("System.Byte").ok()?;
     let mut arr = Il2CppArray::<u8>::new(&byte_class, plain.len()).ok()?;

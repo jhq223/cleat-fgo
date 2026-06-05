@@ -1,8 +1,8 @@
 use cleat::prelude::*;
 
-use crate::obscured;
 use crate::APP;
 use crate::data::{Translations, normalize_width};
+use crate::obscured;
 
 /// Strip FGO rich-text markup tags from game text before matching.
 ///
@@ -142,7 +142,11 @@ fn masterdata_hook(this: &Il2CppObject) -> cleat::Result<()> {
 
     // Patch master data BEFORE original InitMaskClick so the game sees
     // translated data during UI initialisation (matches upstream FGOAssetsModifyTool).
-    log::info!("masterdata: patching {} str + {} obs mappings...", STRING_MAPPINGS.len(), OBS_MAPPINGS.len());
+    log::info!(
+        "masterdata: patching {} str + {} obs mappings...",
+        STRING_MAPPINGS.len(),
+        OBS_MAPPINGS.len()
+    );
 
     let dm: Il2CppObject = match Il2CppClass::find("DataManager")?.static_field_value("instance") {
         Ok(d) => d,
@@ -248,12 +252,11 @@ fn patch_string(
         let normalized = normalize_width(&raw_jp);
         let jp = strip_fgo_markup(&normalized);
 
-        if let Some(cn) = t.get_any(categories, &jp) {
-            if item.store(field, Il2CppString::new(cn)).is_ok() {
+        if let Some(cn) = t.get_any(categories, &jp)
+            && item.store(field, Il2CppString::new(cn)).is_ok() {
                 replaced += 1;
                 continue;
             }
-        }
         // Missed: either no CN mapping or store failed
         missed += 1;
         if sample_missed.borrow().len() < 5 && sample_seen.borrow_mut().insert(jp.clone()) {
@@ -280,11 +283,7 @@ fn patch_string(
 /// encrypted and written to *every* field in `mapping.fields` (matching
 /// upstream where `CommandCodeMaster.ruby->hiddenValue` gets the same
 /// pointer as `name->hiddenValue`).
-fn patch_obscured(
-    dm: &Il2CppObject,
-    mapping: &ObsMapping,
-    t: &Translations,
-) -> cleat::Result<()> {
+fn patch_obscured(dm: &Il2CppObject, mapping: &ObsMapping, t: &Translations) -> cleat::Result<()> {
     let (col, count) = fetch_master_data(dm, mapping.klass)?;
 
     let primary_field = mapping.fields[0];
@@ -382,9 +381,7 @@ fn patch_servant_limit_add(dm: &Il2CppObject, t: &Translations) -> cleat::Result
             // Read value pointer at offset 16 within each 24-byte Entry.
             // (Entry layout: hashCode(4) next(4) key_ptr(8) value_ptr(8))
             let val_ptr = unsafe {
-                std::ptr::read::<*mut std::ffi::c_void>(
-                    entry.add(DICT_ENTRY_OFF_VALUE) as *const _,
-                )
+                std::ptr::read::<*mut std::ffi::c_void>(entry.add(DICT_ENTRY_OFF_VALUE) as *const _)
             };
             if val_ptr.is_null() {
                 continue;
@@ -413,15 +410,12 @@ fn patch_servant_limit_add(dm: &Il2CppObject, t: &Translations) -> cleat::Result
             // pointer into the dictionary entry's value slot.
             let cn_string = Il2CppString::new(cn);
             let cn_raw = cn_string.as_ptr();
-            let val_slot =
-                unsafe { entry.add(DICT_ENTRY_OFF_VALUE) as *mut *mut std::ffi::c_void };
+            let val_slot = unsafe { entry.add(DICT_ENTRY_OFF_VALUE) as *mut *mut std::ffi::c_void };
             unsafe { std::ptr::write(val_slot, cn_raw) };
             replaced += 1;
         }
     }
 
-    log::debug!(
-        "  {klass_name}.script: {replaced} replaced, {entries_checked} entries checked"
-    );
+    log::debug!("  {klass_name}.script: {replaced} replaced, {entries_checked} entries checked");
     Ok(())
 }
