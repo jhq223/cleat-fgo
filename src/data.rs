@@ -2,6 +2,24 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+/// Normalize fullwidth ASCII/symbols (U+FF01–U+FF5E) → halfwidth (U+0021–U+007E),
+/// and fullwidth space (U+3000) → halfwidth space (U+0020).
+///
+/// FGO stores text with fullwidth alphanumerics (e.g. `Ｘ`, `Ａ`, `＆`, `＋`),
+/// but Chaldea's translation dataset often uses halfwidth equivalents. This
+/// normalizes both sides so exact matching works regardless of width.
+pub(crate) fn normalize_width(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '\u{3000}' => ' ',
+            c if ('\u{FF01}'..='\u{FF5E}').contains(&c) => {
+                char::from_u32(c as u32 - 0xFEE0).unwrap_or(c)
+            }
+            _ => c,
+        })
+        .collect()
+}
+
 /// Chaldea-format translation entry: `{ "jp_key": { "CN": "中文", ... }, ... }`.
 #[derive(serde::Deserialize)]
 struct TranslationEntry {
@@ -54,7 +72,7 @@ impl Translations {
             };
             let m: HashMap<String, String> = raw
                 .into_iter()
-                .filter_map(|(k, v)| v.cn.map(|cn| (k, cn)))
+                .filter_map(|(k, v)| v.cn.map(|cn| (normalize_width(&k), cn)))
                 .collect();
             if !m.is_empty() {
                 log::info!("  {name}: {} entries", m.len());

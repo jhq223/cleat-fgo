@@ -163,6 +163,7 @@ dependencies = [
 [[package]]
 name = "cleat"
 version = "0.1.0"
+source = "git+https://github.com/jhq223/cleat.git?rev=85af67f#85af67fc401b0a0677535d40f136c1124f6a4385"
 dependencies = [
  "android_logger",
  "cleat-macros",
@@ -187,6 +188,7 @@ dependencies = [
 [[package]]
 name = "cleat-macros"
 version = "0.1.0"
+source = "git+https://github.com/jhq223/cleat.git?rev=85af67f#85af67fc401b0a0677535d40f136c1124f6a4385"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -491,6 +493,7 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 [[package]]
 name = "il2cpp-bridge-rs"
 version = "0.1.4"
+source = "git+https://github.com/jhq223/il2cpp-bridge-rs.git?rev=5c007fe#5c007fe0d8645d220f95938775779d6f4979fb31"
 dependencies = [
  "dashmap 6.2.1",
  "env_logger",

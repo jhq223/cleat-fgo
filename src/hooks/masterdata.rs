@@ -2,7 +2,41 @@ use cleat::prelude::*;
 
 use crate::obscured;
 use crate::APP;
-use crate::data::Translations;
+use crate::data::{Translations, normalize_width};
+
+/// Strip FGO rich-text markup tags from game text before matching.
+///
+/// The game injects tags like `[g][o]▲[/o][/g]` into skill/treasure-device
+/// descriptions that the Chaldea translation dataset does not contain.
+/// Stripping these before lookup makes exact matching work.
+fn strip_fgo_markup(s: &str) -> String {
+    // FGO markup tags use only ASCII characters (`[x]`, `[/x]`), so we can
+    // detect them at the byte level without allocating a Vec<char>.
+    let mut result = String::with_capacity(s.len());
+    let mut skip = 0usize;
+    for (i, c) in s.char_indices() {
+        if skip > 0 {
+            skip -= 1;
+            continue;
+        }
+        if c == '[' {
+            let rest = &s[i..];
+            let rb = rest.as_bytes();
+            // Check [/x] — 4 ASCII bytes: '[' '/' lowercase ']'
+            if rb.len() >= 4 && rb[1] == b'/' && rb[2].is_ascii_lowercase() && rb[3] == b']' {
+                skip = 3;
+                continue;
+            }
+            // Check [x] — 3 ASCII bytes: '[' lowercase ']'
+            if rb.len() >= 3 && rb[1].is_ascii_lowercase() && rb[2] == b']' {
+                skip = 2;
+                continue;
+            }
+        }
+        result.push(c);
+    }
+    result
+}
 
 // ── Mapping tables ──
 //
@@ -82,6 +116,21 @@ const OBS_MAPPINGS: &[ObsMapping] = &[
     },
 ];
 
+// ── Dictionary raw-memory offsets (matches FGO's .NET runtime layout) ───
+//
+// Array length and data pointer are obtained through cleat's
+// `Il2CppArray::len()` and `Il2CppArray::data_ptr()`; only the
+// Dictionary-specific offsets remain below.
+
+/// Offset of `entries` field in Dictionary<K,V> (64-bit).
+/// Layout: klass(8) monitor(8) buckets(8) entries(8) count(4) ...
+const DICT_OFF_ENTRIES: isize = 0x18;
+
+/// Size of a Dictionary<K,V>::Entry in the entries array (64-bit).
+/// Layout: hashCode(4) next(4) key_ptr(8) value_ptr(8)
+const DICT_ENTRY_SIZE: usize = 24;
+const DICT_ENTRY_OFF_VALUE: usize = 16;
+
 // ── Hook ──────────────────────────────────────────────────────────────────
 
 #[cleat::hook("Assembly-CSharp", "CommonUI", "InitMaskClick")]
@@ -128,6 +177,15 @@ fn masterdata_hook(this: &Il2CppObject) -> cleat::Result<()> {
         }
     }
 
+    // ── ServantLimitAddMaster (per-ascension name overrides) ─────────
+    match patch_servant_limit_add(&dm, &ctx.translations) {
+        Ok(()) => ok += 1,
+        Err(e) => {
+            log::warn!("masterdata: {e}");
+            skip += 1;
+        }
+    }
+
     log::info!("masterdata: {ok} patched, {skip} skipped — now calling original InitMaskClick");
     masterdata_hook::original(this);
     Ok(())
@@ -166,6 +224,8 @@ fn patch_string(
     let mut invalid_utf16 = 0u32;
     let mut load_failed = 0u32;
     let sample_missed: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+    let sample_seen: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
 
     for i in 0..count {
         let Ok(item) = col.invoke_with::<Il2CppObject>("get_Item", (i,)) else {
@@ -175,15 +235,19 @@ fn patch_string(
             load_failed += 1;
             continue;
         };
-        let jp = jp.to_string_lossy();
-        if jp == "<null>" {
+        let raw_jp = jp.to_string_lossy();
+        if raw_jp == "<null>" {
             empty += 1;
             continue;
         }
-        if jp == "<invalid UTF-16>" {
+        if raw_jp == "<invalid UTF-16>" {
             invalid_utf16 += 1;
             continue;
         }
+
+        let normalized = normalize_width(&raw_jp);
+        let jp = strip_fgo_markup(&normalized);
+
         if let Some(cn) = t.get_any(categories, &jp) {
             if item.store(field, Il2CppString::new(cn)).is_ok() {
                 replaced += 1;
@@ -192,7 +256,7 @@ fn patch_string(
         }
         // Missed: either no CN mapping or store failed
         missed += 1;
-        if sample_missed.borrow().len() < 5 {
+        if sample_missed.borrow().len() < 5 && sample_seen.borrow_mut().insert(jp.clone()) {
             sample_missed.borrow_mut().push(jp);
         }
     }
@@ -235,9 +299,13 @@ fn patch_obscured(
         let Ok(obs) = item.load::<Il2CppObject>(primary_field) else {
             continue;
         };
-        let Some(jp) = obscured::obscured_str(&obs) else {
+        let Some(raw_jp) = obscured::obscured_str(&obs) else {
             continue;
         };
+
+        let normalized = normalize_width(&raw_jp);
+        let jp = strip_fgo_markup(&normalized);
+
         let Some(cn) = t.get_any(mapping.categories, &jp) else {
             continue;
         };
@@ -263,6 +331,97 @@ fn patch_obscured(
         "  {}.{:?}: {replaced} replaced",
         mapping.klass,
         mapping.fields
+    );
+    Ok(())
+}
+
+// ── ServantLimitAddMaster patch ───────────────────────────────────────────
+//
+// Mirrors FGOAssetsModifyTool's CommonUI__InitMaskClick where it walks
+// `ServantLimitAddMaster.script` (a Dictionary<string, object>) and
+// replaces any String value with a translation.
+//
+// Without this patch, per-ascension servant-name overrides remain in
+// Japanese — so switching stages makes the name revert to JP.
+
+fn patch_servant_limit_add(dm: &Il2CppObject, t: &Translations) -> cleat::Result<()> {
+    let klass_name = "ServantLimitAddMaster";
+    let (col, count) = fetch_master_data(dm, klass_name)?;
+
+    let mut replaced = 0u32;
+    let mut entries_checked = 0u32;
+
+    for i in 0..count {
+        let Ok(item) = col.invoke_with::<Il2CppObject>("get_Item", (i,)) else {
+            continue;
+        };
+
+        // Load the `script` field — a Dictionary<string, object>
+        let Ok(script) = item.load::<Il2CppObject>("script") else {
+            continue;
+        };
+        if script.raw_ptr().is_null() {
+            continue;
+        }
+
+        // Read Dictionary.entries pointer (offset 0x18 from dict base).
+        let Some(entries_ptr) = (unsafe { script.read_ptr_at(DICT_OFF_ENTRIES) }) else {
+            continue;
+        };
+
+        // Wrap as u8 array to access length and data pointer via cleat.
+        let arr = unsafe { Il2CppArray::<u8>::from_raw(entries_ptr) };
+        let entry_count = arr.len();
+        if entry_count == 0 {
+            continue;
+        }
+        let data = arr.data_ptr();
+
+        for j in 0..entry_count {
+            let entry = unsafe { data.add(j * DICT_ENTRY_SIZE) };
+            // Read value pointer at offset 16 within each 24-byte Entry.
+            // (Entry layout: hashCode(4) next(4) key_ptr(8) value_ptr(8))
+            let val_ptr = unsafe {
+                std::ptr::read::<*mut std::ffi::c_void>(
+                    entry.add(DICT_ENTRY_OFF_VALUE) as *const _,
+                )
+            };
+            if val_ptr.is_null() {
+                continue;
+            }
+
+            entries_checked += 1;
+
+            // Decode the value as a managed string.
+            let jp = unsafe { Il2CppString::from_raw_ptr(val_ptr) }.to_string_lossy();
+            if jp == "<null>" || jp == "<invalid UTF-16>" {
+                continue;
+            }
+
+            let normalized = normalize_width(&jp);
+            let jp_key = strip_fgo_markup(&normalized);
+
+            // Mirror upstream: try svt_names first, then skill_names, td_names, td_ruby
+            let Some(cn) = t.get_any(
+                &["svt_names", "skill_names", "td_names", "td_ruby"],
+                &jp_key,
+            ) else {
+                continue;
+            };
+
+            // Create a new Il2CppString for the translation and write its
+            // pointer into the dictionary entry's value slot.
+            let cn_string = Il2CppString::new(cn);
+            let cn_raw = cn_string.as_ptr();
+            let val_slot =
+                unsafe { entry.add(DICT_ENTRY_OFF_VALUE) as *mut *mut std::ffi::c_void };
+            unsafe { std::ptr::write(val_slot, cn_raw) };
+            replaced += 1;
+        }
+    }
+
+    log::debug!(
+        "  {klass_name}.script: {replaced} replaced, {entries_checked} entries checked"
     );
     Ok(())
 }

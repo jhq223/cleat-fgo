@@ -4,12 +4,13 @@ use std::sync::OnceLock;
 
 fn read_utf16_txt(path: &Path) -> Result<String, std::io::Error> {
     let bytes = fs::read(path)?;
-    // UTF-16 LE → Rust String (discard BOM if present)
     let u16s: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
-    Ok(String::from_utf16_lossy(&u16s))
+    // Strip UTF-16LE BOM (U+FEFF) if present
+    let start = usize::from(u16s.first() == Some(&0xFEFF));
+    Ok(String::from_utf16_lossy(&u16s[start..]))
 }
 
 mod bundle;
