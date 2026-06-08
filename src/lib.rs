@@ -34,9 +34,9 @@ pub(crate) static APP: OnceLock<AppContext> = OnceLock::new();
 fn main() -> cleat::Result<()> {
     log::info!("cleat_fgo v{}", env!("CARGO_PKG_VERSION"));
 
-    cleat::set_app_data("/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files");
-
-    let base = cleat::app_data()?.join("Mod");
+    let base = std::path::PathBuf::from(
+        "/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod",
+    );
     fs::create_dir_all(&base).ok();
     log::info!("mod path: {}", base.display());
 

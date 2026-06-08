@@ -76,7 +76,7 @@ fn font_hook_impl(this: &Il2CppObject) -> cleat::Result<Il2CppObject> {
 
     // Replace only if this label uses the default font.
     if backup.is_null() || cur_ptr == backup {
-        let _ = this.invoke_raw_void("set_trueTypeFont", &[custom.raw_ptr()]);
+        let _ = this.invoke_void("set_trueTypeFont", (*custom,));
     }
 
     Ok(font_hook::original(this))
@@ -91,7 +91,7 @@ fn load_font(path: &std::path::Path) -> cleat::Result<Il2CppObject> {
     let byte_class = Il2CppClass::find("System.Byte")?;
     let mut arr = Il2CppArray::new(&byte_class, data.len())?;
     for (i, &b) in data.iter().enumerate() {
-        arr.set(i, b);
+        unsafe { arr.set_unchecked(i, b) };
     }
 
     // Resolve the four ICALLs needed to load an asset from memory.
@@ -125,7 +125,7 @@ fn load_font(path: &std::path::Path) -> cleat::Result<Il2CppObject> {
     let font_class =
         Il2CppClass::find_with("UnityEngine.Font", "UnityEngine.TextRenderingModule.dll")?;
     let dummy = font_class.new_object()?;
-    let font_type: Il2CppObject = dummy.invoke("GetType")?;
+    let font_type: Il2CppObject = dummy.invoke::<Il2CppObject>("GetType", ())?;
 
     // 4. Load the font asset by name.
     let font_name = Il2CppString::new("FGO-Main-Font-Mod");
@@ -150,6 +150,6 @@ fn load_font(path: &std::path::Path) -> cleat::Result<Il2CppObject> {
     let all_arr = unsafe { Il2CppArray::<Il2CppObject>::from_raw(all) };
 
     all_arr
-        .at(0)
+        .get(0)
         .ok_or_else(|| cleat::Error::Hook("no font asset in bundle".into()))
 }

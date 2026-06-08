@@ -49,7 +49,7 @@ pub fn obscured_str(obj: &Il2CppObject) -> Option<String> {
 
     // XOR decrypt
     let decrypted: Vec<u8> = (0..len)
-        .map(|i| arr.get(i) ^ key_bytes[i % key_bytes.len()])
+        .map(|i| arr.get(i).unwrap_or(0) ^ key_bytes[i % key_bytes.len()])
         .collect();
 
     // Convert UTF-16LE bytes → Rust String
@@ -81,7 +81,7 @@ pub fn obscured_encrypt(obj: &Il2CppObject, text: &str) -> Option<Il2CppArray<u8
     let mut arr = Il2CppArray::<u8>::new(&byte_class, plain.len()).ok()?;
 
     for (i, &b) in plain.iter().enumerate() {
-        arr.set(i, b ^ key_bytes[i % key_bytes.len()]);
+        unsafe { arr.set_unchecked(i, b ^ key_bytes[i % key_bytes.len()]) };
     }
 
     Some(arr)

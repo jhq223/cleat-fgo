@@ -36,9 +36,9 @@ checksum = "84521a3cf562bc62942e294181d9eef17eb38ceb8c68677bc49f144e4c3d4f8d"
 
 [[package]]
 name = "android_logger"
-version = "0.14.1"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05b07e8e73d720a1f2e4b6014766e6039fd2e96a4fa44e2a78d0e1fa2ff49826"
+checksum = "dbb4e440d04be07da1f1bf44fb4495ebd58669372fe0cffa6e48595ac5bd88a3"
 dependencies = [
  "android_log-sys",
  "env_filter 0.1.4",
@@ -103,9 +103,9 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "bitflags"
-version = "2.12.1"
+version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84d7ced0ae9557296835c32bf1b1e02b44c746701f898460fb000d7eaa84f00a"
+checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 
 [[package]]
 name = "block-buffer"
@@ -162,8 +162,8 @@ dependencies = [
 
 [[package]]
 name = "cleat"
-version = "0.1.0"
-source = "git+https://github.com/jhq223/cleat.git?rev=85af67f#85af67fc401b0a0677535d40f136c1124f6a4385"
+version = "0.1.1"
+source = "git+https://github.com/jhq223/cleat.git#6e1d40cd2fcbd7bb116c0ca9b8b9ca701d196949"
 dependencies = [
  "android_logger",
  "cleat-macros",
@@ -188,7 +188,7 @@ dependencies = [
 [[package]]
 name = "cleat-macros"
 version = "0.1.0"
-source = "git+https://github.com/jhq223/cleat.git?rev=85af67f#85af67fc401b0a0677535d40f136c1124f6a4385"
+source = "git+https://github.com/jhq223/cleat.git#6e1d40cd2fcbd7bb116c0ca9b8b9ca701d196949"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -493,7 +493,7 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 [[package]]
 name = "il2cpp-bridge-rs"
 version = "0.1.4"
-source = "git+https://github.com/jhq223/il2cpp-bridge-rs.git?rev=5c007fe#5c007fe0d8645d220f95938775779d6f4979fb31"
+source = "git+https://github.com/Batchhh/il2cpp-bridge-rs.git#8542d313e6563595ba6b3c5b413de368eb5a49e5"
 dependencies = [
  "dashmap 6.2.1",
  "env_logger",

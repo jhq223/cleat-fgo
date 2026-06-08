@@ -207,7 +207,7 @@ fn fetch_master_data(dm: &Il2CppObject, klass_name: &str) -> cleat::Result<(Il2C
     let data: Il2CppObject = inflated.invoke(()).map_err(&mkerr)?;
 
     let col: Il2CppObject = data.load("list").map_err(&mkerr)?;
-    let count: i32 = col.invoke("get_Count").map_err(&mkerr)?;
+    let count: i32 = col.invoke::<i32>("get_Count", ()).map_err(&mkerr)?;
 
     Ok((col, count))
 }
@@ -232,7 +232,7 @@ fn patch_string(
         std::cell::RefCell::new(std::collections::HashSet::new());
 
     for i in 0..count {
-        let Ok(item) = col.invoke_with::<Il2CppObject>("get_Item", (i,)) else {
+        let Ok(item) = col.invoke::<Il2CppObject>("get_Item", (i,)) else {
             continue;
         };
         let Ok(jp) = item.load::<Il2CppString>(field) else {
@@ -253,10 +253,11 @@ fn patch_string(
         let jp = strip_fgo_markup(&normalized);
 
         if let Some(cn) = t.get_any(categories, &jp)
-            && item.store(field, Il2CppString::new(cn)).is_ok() {
-                replaced += 1;
-                continue;
-            }
+            && item.store(field, Il2CppString::new(cn)).is_ok()
+        {
+            replaced += 1;
+            continue;
+        }
         // Missed: either no CN mapping or store failed
         missed += 1;
         if sample_missed.borrow().len() < 5 && sample_seen.borrow_mut().insert(jp.clone()) {
@@ -290,7 +291,7 @@ fn patch_obscured(dm: &Il2CppObject, mapping: &ObsMapping, t: &Translations) -> 
     let mut replaced = 0u32;
 
     for i in 0..count {
-        let Ok(item) = col.invoke_with::<Il2CppObject>("get_Item", (i,)) else {
+        let Ok(item) = col.invoke::<Il2CppObject>("get_Item", (i,)) else {
             continue;
         };
 
@@ -351,7 +352,7 @@ fn patch_servant_limit_add(dm: &Il2CppObject, t: &Translations) -> cleat::Result
     let mut entries_checked = 0u32;
 
     for i in 0..count {
-        let Ok(item) = col.invoke_with::<Il2CppObject>("get_Item", (i,)) else {
+        let Ok(item) = col.invoke::<Il2CppObject>("get_Item", (i,)) else {
             continue;
         };
 
