@@ -1,9 +1,11 @@
+mod assetbundle_keys;
 mod classname;
 mod font;
 mod localization;
 mod masterdata;
 mod script;
 
+use assetbundle_keys::{add_assetbundle_keys_hook, set_assetbundle_keys_hook};
 use classname::classname_hook;
 use font::font_hook;
 use localization::localization_hook;
@@ -28,6 +30,8 @@ pub fn install() -> cleat::Result<()> {
     install!(localization_hook);
     install!(masterdata_hook);
     install!(classname_hook);
+    install!(set_assetbundle_keys_hook);
+    install!(add_assetbundle_keys_hook);
 
     log::info!("all hooks installed");
     Ok(())
