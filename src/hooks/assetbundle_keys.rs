@@ -1,3 +1,6 @@
+//! Capture assetbundle keys from `CatAndMouseGame.SetAssetbundleKeys`.
+//! Needed by the story script decrypter to unpack encrypted scenario data.
+
 use cleat::prelude::*;
 use serde::Serialize;
 
@@ -15,20 +18,13 @@ struct KeyEntry {
 
 #[cleat::hook("Assembly-CSharp", "CatAndMouseGame", "SetAssetbundleKeys")]
 fn set_assetbundle_keys_hook(obj: Il2CppObject) -> cleat::Result<()> {
-    dump_keys("SetAssetbundleKeys", &obj);
+    dump_keys(&obj);
     set_assetbundle_keys_hook::original(obj);
     Ok(())
 }
 
-#[cleat::hook("Assembly-CSharp", "CatAndMouseGame", "AddAssetbundleKeys")]
-fn add_assetbundle_keys_hook(obj: Il2CppObject) -> cleat::Result<()> {
-    dump_keys("AddAssetbundleKeys", &obj);
-    add_assetbundle_keys_hook::original(obj);
-    Ok(())
-}
-
-fn dump_keys(label: &str, list_obj: &Il2CppObject) {
-    log::info!("assetbundle keys: {label}");
+fn dump_keys(list_obj: &Il2CppObject) {
+    log::info!("assetbundle keys: SetAssetbundleKeys");
 
     let Some(items_ptr) = (unsafe { list_obj.read_ptr_at(0x10) }) else {
         log::warn!("  no _items pointer");
@@ -99,16 +95,16 @@ fn dump_keys(label: &str, list_obj: &Il2CppObject) {
         }
     }
 
-    log::info!("  {label}: {} keys", entries.len());
+    log::info!("  {} keys", entries.len());
 
     let out_path = std::path::PathBuf::from(
         "/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod",
     )
-    .join(format!("keys_{label}.json"));
+    .join("keys.json");
     match serde_json::to_string_pretty(&entries) {
         Ok(json) => {
             if let Err(e) = std::fs::write(&out_path, &json) {
-                log::error!("  failed to write {label}.json: {e}");
+                log::error!("  failed to write keys.json: {e}");
             } else {
                 log::info!("  saved {} entries to {}", entries.len(), out_path.display());
             }
