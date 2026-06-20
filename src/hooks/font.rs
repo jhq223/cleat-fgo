@@ -8,7 +8,7 @@ use crate::APP;
 // ── Font state ──
 //
 // Font loading is deferred to the first UILabel access because the Unity
-// AssetBundle ICALLs are not available during cleat::main().
+// AssetBundle methods are not available during cleat::main().
 //
 //   FONT.get() == None         → not tried yet
 //   FONT.get() == Some(None)   → tried, failed — pass through
@@ -35,7 +35,7 @@ fn font_hook(this: &Il2CppObject) -> cleat::Result<Il2CppObject> {
 }
 
 fn font_hook_impl(this: &Il2CppObject) -> cleat::Result<Il2CppObject> {
-    // One-shot lazy init: load the custom font once per process.
+    // One-shot lazy-init: load the custom font once per process.
     let custom = match FONT.get_or_init(|| {
         let Some(ctx) = APP.get() else {
             log::error!("font: APP not set");
@@ -82,74 +82,15 @@ fn font_hook_impl(this: &Il2CppObject) -> cleat::Result<Il2CppObject> {
     Ok(font_hook::original(this))
 }
 
-/// Loads the custom font file as a Unity Font object via AssetBundle ICALLs.
+/// Loads the custom font file as a Unity Font object via AssetBundle.
 fn load_font(path: &std::path::Path) -> cleat::Result<Il2CppObject> {
     let data =
         std::fs::read(path).map_err(|e| cleat::Error::Hook(format!("read font file: {e}")))?;
 
-    // Build a Unity byte[] from the raw file bytes.
-    let byte_class = Il2CppClass::find("System.Byte")?;
-    let mut arr = Il2CppArray::new(&byte_class, data.len())?;
-    for (i, &b) in data.iter().enumerate() {
-        unsafe { arr.set_unchecked(i, b) };
-    }
-
-    // Resolve the four ICALLs needed to load an asset from memory.
-    let p_load = cleat::resolve_icall(
-        "UnityEngine.AssetBundle::LoadFromMemoryAsync_Internal(System.Byte[],System.UInt32)",
-    )?;
-    let p_get_bundle =
-        cleat::resolve_icall("UnityEngine.AssetBundleCreateRequest::get_assetBundle()")?;
-    let p_load_asset = cleat::resolve_icall(
-        "UnityEngine.AssetBundle::LoadAssetAsync_Internal(System.String,System.Type)",
-    )?;
-    let p_get_all = cleat::resolve_icall("UnityEngine.AssetBundleRequest::get_allAssets()")?;
-
-    // 1. Create the asset bundle request from the byte array.
-    let req = unsafe { cleat::invoke_icall_2(p_load, arr.as_ptr(), std::ptr::null_mut()) };
-    if req.is_null() {
-        return Err(cleat::Error::Hook(
-            "LoadFromMemoryAsync returned null".into(),
-        ));
-    }
-    let req = unsafe { Il2CppObject::from_raw(req) };
-
-    // 2. Get the AssetBundle from the completed request.
-    let bundle_ptr = unsafe { cleat::invoke_icall_1(p_get_bundle, req.raw_ptr()) };
-    if bundle_ptr.is_null() {
-        return Err(cleat::Error::Hook("get_assetBundle returned null".into()));
-    }
-    let bundle = unsafe { Il2CppObject::from_raw(bundle_ptr) };
-
-    // 3. Create a dummy Font to obtain the System.Type for Font.
-    let font_class =
-        Il2CppClass::find_with("UnityEngine.Font", "UnityEngine.TextRenderingModule.dll")?;
-    let dummy = font_class.new_object()?;
-    let font_type: Il2CppObject = dummy.invoke::<Il2CppObject>("GetType", ())?;
-
-    // 4. Load the font asset by name.
-    let font_name = Il2CppString::new("FGO-Main-Font-Mod");
-    let asset_req = unsafe {
-        cleat::invoke_icall_3(
-            p_load_asset,
-            bundle.raw_ptr(),
-            font_name.as_ptr(),
-            font_type.raw_ptr(),
-        )
-    };
-    if asset_req.is_null() {
-        return Err(cleat::Error::Hook("LoadAssetAsync returned null".into()));
-    }
-    let asset_req = unsafe { Il2CppObject::from_raw(asset_req) };
-
-    // 5. Get the loaded assets array.
-    let all = unsafe { cleat::invoke_icall_1(p_get_all, asset_req.raw_ptr()) };
-    if all.is_null() {
-        return Err(cleat::Error::Hook("get_allAssets returned null".into()));
-    }
-    let all_arr = unsafe { Il2CppArray::<Il2CppObject>::from_raw(all) };
-
-    all_arr
-        .get(0)
-        .ok_or_else(|| cleat::Error::Hook("no font asset in bundle".into()))
+    cleat::load_asset_from_memory(
+        &data,
+        "FGO-Main-Font-Mod",
+        "UnityEngine.Font",
+        "UnityEngine.TextRenderingModule.dll",
+    )
 }

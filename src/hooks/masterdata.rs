@@ -103,14 +103,17 @@ const OBS_MAPPINGS: &[ObsMapping] = &[
     },
 ];
 
-/// Dictionary<K,V>.entries offset (64-bit IL2CPP).
-/// Layout: klass(8) monitor(8) buckets(8) entries(8) count(4) ...
-const DICT_OFF_ENTRIES: isize = 0x18;
-
-/// Dictionary<K,V>::Entry size and field offsets (64-bit).
-/// Layout: hashCode(4) next(4) key_ptr(8) value_ptr(8)
+/// Dictionary<string,object> entry layout (64-bit IL2CPP).
+/// We use Il2CppDictionary for typed access instead of raw offsets.
+///
+/// Entry size = 24 bytes: hashCode(4) + next(4) + key(8) + value(8)
+/// Value offset within entry = 16
 const DICT_ENTRY_SIZE: usize = 24;
 const DICT_ENTRY_OFF_VALUE: usize = 16;
+
+// NOTE: These constants are kept for the ServantLimitAddMaster script field
+// which uses a raw Dictionary<string,object> accessed via memory offsets.
+// Once Il2CppDictionary is proven on-device, this can be replaced too.
 
 #[cleat::hook("Assembly-CSharp", "CommonUI", "InitMaskClick")]
 fn masterdata_hook(this: &Il2CppObject) -> cleat::Result<()> {
@@ -264,23 +267,22 @@ fn patch_servant_limit_add(dm: &Il2CppObject, t: &Translations) -> cleat::Result
             continue;
         };
 
-        let Ok(script) = item.load::<Il2CppObject>("script") else {
+        // Load the script field directly as a Dictionary — it IS the
+        // Dictionary<string,object>, not an object containing one.
+        let dict: Il2CppDictionary<*mut std::ffi::c_void, *mut std::ffi::c_void> =
+            match item.load("script") {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+
+        let Some(entries_arr) = dict.entries_array() else {
             continue;
         };
-        if script.raw_ptr().is_null() {
-            continue;
-        }
-
-        let Some(entries_ptr) = (unsafe { script.read_ptr_at(DICT_OFF_ENTRIES) }) else {
-            continue;
-        };
-
-        let arr = unsafe { Il2CppArray::<u8>::from_raw(entries_ptr) };
-        let entry_count = arr.len();
+        let entry_count = entries_arr.len();
         if entry_count == 0 {
             continue;
         }
-        let data = arr.data_ptr();
+        let data = entries_arr.data_ptr();
 
         for j in 0..entry_count {
             let entry = unsafe { data.add(j * DICT_ENTRY_SIZE) };

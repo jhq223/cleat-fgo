@@ -43,19 +43,25 @@ fn dump_keys(list_obj: &Il2CppObject) {
     for i in 0..len {
         let Some(dict_obj) = arr.get(i) else { continue };
         let dict_ptr = dict_obj.raw_ptr();
-        if dict_ptr.is_null() { continue; }
+        if dict_ptr.is_null() {
+            continue;
+        }
 
         let count = unsafe {
             std::ptr::read::<i32>((dict_ptr as *const u8).offset(DICT_OFF_COUNT) as *const i32)
         };
-        if count <= 0 || count > 100 { continue; }
+        if count <= 0 || count > 100 {
+            continue;
+        }
 
         let entries_ptr = unsafe {
             std::ptr::read::<*mut std::ffi::c_void>(
-                (dict_ptr as *const u8).offset(DICT_OFF_ENTRIES) as *const _
+                (dict_ptr as *const u8).offset(DICT_OFF_ENTRIES) as *const _,
             )
         };
-        if entries_ptr.is_null() || (entries_ptr as usize) < 0x10000 { continue; }
+        if entries_ptr.is_null() || (entries_ptr as usize) < 0x10000 {
+            continue;
+        }
 
         let ent_arr = unsafe { Il2CppArray::<u8>::from_raw(entries_ptr) };
         let ent_data = ent_arr.data_ptr();
@@ -106,7 +112,11 @@ fn dump_keys(list_obj: &Il2CppObject) {
             if let Err(e) = std::fs::write(&out_path, &json) {
                 log::error!("  failed to write keys.json: {e}");
             } else {
-                log::info!("  saved {} entries to {}", entries.len(), out_path.display());
+                log::info!(
+                    "  saved {} entries to {}",
+                    entries.len(),
+                    out_path.display()
+                );
             }
         }
         Err(e) => log::error!("  JSON serialize error: {e}"),
