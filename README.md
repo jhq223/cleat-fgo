@@ -89,6 +89,15 @@ cargo ndk -t arm64-v8a -o ./target/jniLibs build --release
 # → target/jniLibs/arm64-v8a/libcleat_fgo.so
 ```
 
+## Bundled Libraries
+
+Release 包含以下第三方库：
+
+| Library | Source | License |
+|---------|--------|--------|
+| libshadowhook.so | [ByteDance ShadowHook](https://github.com/bytedance/android-inline-hook) | MIT |
+| libshadowhook_nothing.so | [ByteDance ShadowHook](https://github.com/bytedance/android-inline-hook) | MIT |
+
 ## License
 
 MIT
