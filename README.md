@@ -1,103 +1,77 @@
 # cleat-fgo
 
-Fate/Grand Order (JP) translation mod — powered by [cleat](https://github.com/jhq223/cleat).
+An Android translation module for FGO JP, built with [cleat](https://github.com/jhq223/cleat).
 
-## Features
+[中文](README_zh.md) · [Download APK](https://github.com/jhq223/cleat-fgo-build/releases/latest) · [Changes](CHANGELOG.md)
 
-### Master Data Translation
+## Install
 
-Patches 21 in-game data tables at runtime via IL2CPP hooks:
+Download and install `fgo-mod.apk`, then start the game. The module enables 60 FPS and downloads translations automatically. Restart after the first download to apply story, interface and font updates.
 
-| Category | Examples |
-|---|---|
-| Servants | Names (base + per-ascension overrides) |
-| Skills, Noble Phantasms | Names, descriptions, ruby, types |
-| Craft Essences, Command Codes | Names, descriptions |
-| Costumes, Mystic Codes | Names, details |
-| Items, Shop | Names |
-| Quests, Maps, Events | Names |
-| Buffs, Missions | Names, descriptions |
+[Chaldea](https://github.com/chaldea-center/chaldea-data) mappings provide translations for servants, skills, Noble Phantasms, equipment, items, quests and events. Story packs align CN dialogue, choices and speakers with JP scripts.
 
-Handles FGO-specific `ObscuredString` encryption and strips rich-text markup
-tags before translation lookup.
+## Updates
 
-### Script Bundle Replacement
+The module checks for translation and APK updates every 24 hours. Story resources come from this repository's [resources Release](https://github.com/jhq223/cleat-fgo/releases/tag/resources), and APKs come from [cleat-fgo-build](https://github.com/jhq223/cleat-fgo-build/releases/latest).
 
-Decrypts `.script` bundle files (TextBundle: Rijndael-256-CBC → zlib → UTF-16LE)
-and replaces in-game story/dialogue text.
+Open the APK from the Android download notification when it is ready. Restart the game after translation updates.
 
-### Class Name Translation
+## Import into Chaldea
 
-Translates servant class IDs to English (`Saber`, `Archer`, `Berserker`, …).
+After a successful login, the response is saved to:
 
-### Custom Font
-
-Loads a Unity Font asset from the Mod folder and replaces the default font on
-all `UILabel` instances.
-
-### Custom Localization
-
-Injects a `LocalizationJpn.txt` file into `LocalizationManager.SetTextData`.
-
-## Mod Folder
-
-Place under `/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod/`:
-
-```
-Mod/
-├── svt_names.json
-├── ce_names.json
-├── cc_names.json
-├── costume_names.json
-├── mc_names.json / mc_detail.json
-├── skill_names.json / skill_detail.json
-├── td_names.json / td_ruby.json / td_types.json / td_detail.json
-├── item_names.json
-├── entity_names.json
-├── quest_names.json / spot_names.json / event_names.json / war_names.json
-├── buff_names.json / buff_detail.json
-├── event_mission.json / mission_names.json
-├── *.script              # TextBundle files
-├── LocalizationJpn.txt   # UTF-16LE
-└── Font                  # Unity Font asset bundle
+```text
+/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod/exports/chaldea-login.json
 ```
 
-Translation JSONs follow the [chaldea-data] format. Download them from
-[chaldea-data/mappings](https://github.com/chaldea-center/chaldea-data/tree/main/mappings):
+Select this file in Chaldea to import servant and material data. See the [Chaldea import guide](https://docs.chaldea.center/guide/import_https/). Each successful login updates the file.
+
+## Configuration
+
+Configuration is created on first launch at `Android/data/com.aniplex.fategrandorder/files/Mod/config.json`. Restart the game after editing it.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `auto_update` | `true` | Update translation mappings and resource packs |
+| `update_interval_hours` | `24` | Check interval, from 1 to 168 hours |
+| `resource_manifest_url` | `manifest.json` in this repository's resources Release | Story resource URL; set to `null` to disable |
+| `github_mirror` | `https://gh-proxy.com` | GitHub download mirror; set to `null` for direct access |
+| `record_missing` | `true` | Record untranslated text in `missing-text.jsonl` |
+| `export_login_response` | `true` | Save the Chaldea import file |
+| `check_apk_updates` | `true` | Check for APK updates |
+| `download_apk_updates` | `true` | Download new APKs automatically |
+
+## Add translations
+
+Place custom translations in `Mod/overrides/`. For example, create `ui.json`:
 
 ```json
 {
-  "アルトリア・ペンドラゴン": { "CN": "阿尔托莉雅·潘德拉贡" },
-  "エミヤ": { "CN": "英灵卫宫" }
+  "ゲーム開始": "开始游戏",
+  "閉じる": "关闭"
 }
 ```
 
-Keys are normalised (fullwidth → halfwidth) before matching.
+Each key is the original text and each value is its translation. Preserve format arguments such as `{0}` and `%s`.
 
-[chaldea-data]: https://github.com/chaldea-center/chaldea-data
+| File | Contents |
+|---|---|
+| `ui.json` | Original-to-translated text mapping |
+| `*.script` | Story bundle |
+| `LocalizationJpn.txt` | Interface localization |
+| `Font` | Unity AssetBundle containing `FGO-Main-Font-Mod` |
+| Chaldea mapping JSON | Translations for the corresponding category |
+
+Files load in this priority order: `overrides/` → the `Mod/` directory → online resources. Remove a local file to use its online version.
+
+See [cleat-fgo-helper](https://github.com/jhq223/cleat-fgo-helper) to build and publish story packs.
 
 ## Build
 
-**Requirements**
+Place cleat next to this repository and follow its [build guide](https://github.com/jhq223/cleat/blob/main/docs/en/BUILD.md) to set up Rust and Android NDK. Run:
 
-- Rust nightly
-- Android NDK r26+
-- [cargo-ndk](https://github.com/bbqsrc/cargo-ndk) ≥ 3.0
-
-```bash
-cargo ndk -t arm64-v8a -o ./target/jniLibs build --release
-# → target/jniLibs/arm64-v8a/libcleat_fgo.so
+```sh
+cargo ndk -t arm64-v8a build --release --locked
 ```
 
-## Bundled Libraries
-
-Release 包含以下第三方库：
-
-| Library | Source | License |
-|---------|--------|--------|
-| libshadowhook.so | [ByteDance ShadowHook](https://github.com/bytedance/android-inline-hook) | MIT |
-| libshadowhook_nothing.so | [ByteDance ShadowHook](https://github.com/bytedance/android-inline-hook) | MIT |
-
-## License
-
-MIT
+The library is written to `target/aarch64-linux-android/release/libcleat_fgo.so`. See [cleat-fgo-build](https://github.com/jhq223/cleat-fgo-build) for APK packaging.

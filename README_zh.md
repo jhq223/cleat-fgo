@@ -1,93 +1,77 @@
 # cleat-fgo
 
-Fate/Grand Order（日服）翻译模组 — 基于 [cleat](https://github.com/jhq223/cleat)。
+FGO 日服 Android 汉化模块，基于 [cleat](https://github.com/jhq223/cleat)。
 
-## 功能
+[English](README.md) · [下载 APK](https://github.com/jhq223/cleat-fgo-build/releases/latest) · [修改历史](CHANGELOG.md)
 
-### Master Data 翻译
+## 安装
 
-通过 IL2CPP hook 在运行时补丁 21 张游戏数据表：
+下载并安装 `fgo-mod.apk`，启动游戏。模块默认启用 60 FPS，并自动下载翻译数据。首次下载完成后重启游戏，应用剧情、界面文本和字体更新。
 
-| 类别 | 示例 |
-|---|---|
-| 从者 | 名称（含各阶段覆写） |
-| 技能、宝具 | 名称、描述、注音、类型 |
-| 礼装、指令纹章 | 名称、描述 |
-| 灵衣、魔术礼装 | 名称、详细信息 |
-| 物品、商店 | 名称 |
-| 关卡、地图、活动 | 名称 |
-| Buff、任务 | 名称、描述 |
+汉化使用 [Chaldea](https://github.com/chaldea-center/chaldea-data) 的从者、技能、宝具、礼装、物品、任务和活动等映射。剧情使用国服文本，按日服脚本对齐对白、选项和姓名。
 
-处理 FGO 特有的 `ObscuredString` 加密，并在匹配翻译前剥离富文本标记。
+## 更新
 
-### Script Bundle 替换
+模块每 24 小时检查翻译和 APK 更新。剧情资源从本仓库的 [resources Release](https://github.com/jhq223/cleat-fgo/releases/tag/resources) 下载，APK 从 [cleat-fgo-build](https://github.com/jhq223/cleat-fgo-build/releases/latest) 下载。
 
-解密 `.script` bundle 文件（TextBundle 格式：Rijndael-256-CBC → zlib → UTF-16LE），
-替换游戏内剧情/对话文本。
+APK 下载完成后，在 Android 下载通知中打开安装包。翻译更新完成后重启游戏。
 
-### 职阶名翻译
+## 导入 Chaldea
 
-将职阶 ID 翻译为英文（`Saber`、`Archer`、`Berserker` …）。
+登录成功后，响应文件保存到：
 
-### 自定义字体
-
-从 Mod 文件夹加载 Unity Font 资源包，替换所有 `UILabel` 的默认字体。
-
-### 自定义本地化
-
-将 `LocalizationJpn.txt` 注入 `LocalizationManager.SetTextData`。
-
-## Mod 文件夹
-
-放入 `/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod/`：
-
-```
-Mod/
-├── svt_names.json
-├── ce_names.json
-├── cc_names.json
-├── costume_names.json
-├── mc_names.json / mc_detail.json
-├── skill_names.json / skill_detail.json
-├── td_names.json / td_ruby.json / td_types.json / td_detail.json
-├── item_names.json
-├── entity_names.json
-├── quest_names.json / spot_names.json / event_names.json / war_names.json
-├── buff_names.json / buff_detail.json
-├── event_mission.json / mission_names.json
-├── *.script              # TextBundle 文件
-├── LocalizationJpn.txt   # UTF-16LE 编码
-└── Font                  # Unity Font 资源包
+```text
+/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod/exports/chaldea-login.json
 ```
 
-翻译 JSON 使用 [chaldea-data] 格式，可从
-[chaldea-data/mappings](https://github.com/chaldea-center/chaldea-data/tree/main/mappings)
-下载：
+在 Chaldea 中选择该文件导入从者和素材数据。详见 [Chaldea 导入指南](https://docs.chaldea.center/zh/guide/import_https/)。每次成功登录会更新这个文件。
+
+## 配置
+
+配置位于 `Android/data/com.aniplex.fategrandorder/files/Mod/config.json`，首次启动时生成。修改后重启游戏。
+
+| 配置项 | 默认值 | 用途 |
+|---|---|---|
+| `auto_update` | `true` | 自动更新翻译映射和资源包 |
+| `update_interval_hours` | `24` | 更新检查间隔，范围 1～168 小时 |
+| `resource_manifest_url` | 本仓库 resources Release 的 `manifest.json` | 剧情资源地址；设为 `null` 可关闭 |
+| `github_mirror` | `https://gh-proxy.com` | GitHub 下载镜像；设为 `null` 可直连 |
+| `record_missing` | `true` | 将待翻译文本记录到 `missing-text.jsonl` |
+| `export_login_response` | `true` | 保存 Chaldea 导入文件 |
+| `check_apk_updates` | `true` | 检查 APK 更新 |
+| `download_apk_updates` | `true` | 自动下载新 APK |
+
+## 补充翻译
+
+将自定义翻译放在 `Mod/overrides/`。例如创建 `ui.json`：
 
 ```json
 {
-  "アルトリア・ペンドラゴン": { "CN": "阿尔托莉雅·潘德拉贡" },
-  "エミヤ": { "CN": "英灵卫宫" }
+  "ゲーム開始": "开始游戏",
+  "閉じる": "关闭"
 }
 ```
 
-Key 在匹配前会做全角→半角标准化。
+键为游戏原文，值为译文。保留原文中的 `{0}`、`%s` 等格式参数。
 
-[chaldea-data]: https://github.com/chaldea-center/chaldea-data
+| 文件 | 内容 |
+|---|---|
+| `ui.json` | 原文到译文的 JSON 映射 |
+| `*.script` | 剧情包 |
+| `LocalizationJpn.txt` | 界面本地化文本 |
+| `Font` | 包含 `FGO-Main-Font-Mod` 的 Unity AssetBundle |
+| Chaldea 映射 JSON | 对应类别的翻译数据 |
 
-## 编译
+加载优先级为 `overrides/` → `Mod/` 根目录 → 在线资源。移走本地同名文件即可使用在线版本。
 
-**依赖**
+剧情包的制作和发布见 [cleat-fgo-helper](https://github.com/jhq223/cleat-fgo-helper)。
 
-- Rust nightly
-- Android NDK r26+
-- [cargo-ndk](https://github.com/bbqsrc/cargo-ndk) ≥ 3.0
+## 构建
 
-```bash
-cargo ndk -t arm64-v8a -o ./target/jniLibs build --release
-# → target/jniLibs/arm64-v8a/libcleat_fgo.so
+将 cleat 与此仓库放在同一目录下，按 [cleat 构建文档](https://github.com/jhq223/cleat/blob/main/docs/zh/BUILD.md)准备 Rust 和 Android NDK，在本仓库执行：
+
+```sh
+cargo ndk -t arm64-v8a build --release --locked
 ```
 
-## License
-
-MIT
+输出为 `target/aarch64-linux-android/release/libcleat_fgo.so`。APK 打包流程见 [cleat-fgo-build](https://github.com/jhq223/cleat-fgo-build)。
