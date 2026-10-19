@@ -4,11 +4,7 @@ use cleat::android::jni::{
     self, Env, JValue, jni_sig, jni_str,
     objects::{JObject, JString},
 };
-use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom, Write},
-    os::fd::FromRawFd,
-};
+use std::{fs::File, io::Read, os::fd::FromRawFd};
 
 const DIRECTORY: &str = "Download/cleat-fgo/";
 const NAME: &str = "chaldea-login.json";
@@ -28,7 +24,7 @@ pub fn export_login(body: &[u8]) -> Result<bool, String> {
         return Ok(false);
     }
     let (uri, created) = find_or_create()?;
-    let result = write_response(&uri, body);
+    let result = write_response(&uri, body, created);
     if result.is_err() && created {
         let _ = delete(&uri);
     }
@@ -96,7 +92,7 @@ fn find_or_create() -> Result<(String, bool), String> {
         let projection = env.new_object_array(1, jni_str!("java/lang/String"), JObject::null())?;
         let column = env.new_string("_id")?;
         projection.set_element(env, 0, &column)?;
-        let selection = env.new_string("relative_path = ? AND _display_name = ? AND owner_package_name = ?")?;
+        let selection = env.new_string("relative_path = ? AND (_display_name = ? OR _display_name LIKE 'chaldea-login (%).json') AND owner_package_name = ?")?;
         let args = env.new_object_array(3, jni_str!("java/lang/String"), JObject::null())?;
         for (index, value) in [DIRECTORY, NAME].iter().enumerate() {
             let value = env.new_string(value)?;
@@ -155,7 +151,7 @@ fn open(value: &str) -> Result<File, String> {
     let fd = with_java(|env| {
         let resolver = resolver(env)?;
         let uri = uri(env, value)?;
-        let mode = env.new_string("rw")?;
+        let mode = env.new_string("r")?;
         let descriptor = env
             .call_method(
                 &resolver,
@@ -215,13 +211,6 @@ fn delete(value: &str) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
-fn replace(file: &mut File, bytes: &[u8]) -> std::io::Result<()> {
-    file.seek(SeekFrom::Start(0))?;
-    file.write_all(bytes)?;
-    file.set_len(bytes.len() as u64)?;
-    file.sync_all()
-}
-
 fn read_previous(uri: &str) -> Result<Vec<u8>, String> {
     let mut file = open(uri)?;
     if file.metadata().map_err(|e| e.to_string())?.len() > MAX_EXPORT {
@@ -232,19 +221,52 @@ fn read_previous(uri: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn write_file(uri: &str, bytes: &[u8]) -> Result<(), String> {
-    let mut file = open(uri)?;
-    replace(&mut file, bytes).map_err(|error| error.to_string())
+fn write_file(value: &str, bytes: &[u8]) -> Result<(), String> {
+    with_java(|env| {
+        let resolver = resolver(env)?;
+        let uri = uri(env, value)?;
+        let mode = env.new_string("wt")?;
+        let stream = env
+            .call_method(
+                &resolver,
+                jni_str!("openOutputStream"),
+                jni_sig!("(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;"),
+                &[JValue::Object(&uri), JValue::Object(&mode)],
+            )?
+            .l()?;
+        if stream.is_null() {
+            return Err(jni::errors::Error::NullPtr("download output stream"));
+        }
+        let written: jni::errors::Result<()> = (|| {
+            let bytes = env.byte_array_from_slice(bytes)?;
+            env.call_method(
+                &stream,
+                jni_str!("write"),
+                jni_sig!("([B)V"),
+                &[JValue::Object(&bytes)],
+            )?;
+            Ok(())
+        })();
+        let closed = env.call_method(&stream, jni_str!("close"), jni_sig!("()V"), &[]);
+        written?;
+        closed?;
+        Ok(())
+    })
+    .map_err(|error| error.to_string())
 }
 
-fn write_response(uri: &str, body: &[u8]) -> Result<(), String> {
-    let previous = read_previous(uri)?;
-    // MediaStore may rename pending files. Close every descriptor before changing
-    // metadata so shared-storage providers can complete their rename/unlink work.
-    pending(uri, true)?;
-    let result = write_file(uri, body).and_then(|()| pending(uri, false));
-    if result.is_err() && write_file(uri, &previous).is_ok() {
-        let _ = pending(uri, false);
+fn write_response(uri: &str, body: &[u8], created: bool) -> Result<(), String> {
+    let previous = if created {
+        Vec::new()
+    } else {
+        read_previous(uri)?
+    };
+    // Closing the provider's OutputStream also updates the download's metadata.
+    // IS_PENDING is used only for a newly inserted file; existing files keep their URI/name.
+    let result =
+        write_file(uri, body).and_then(|()| if created { pending(uri, false) } else { Ok(()) });
+    if result.is_err() && !created {
+        let _ = write_file(uri, &previous);
     }
     result
 }
