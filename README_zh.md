@@ -18,13 +18,13 @@ APK 下载完成后，在 Android 下载通知中打开安装包。翻译更新�
 
 ## 导入 Chaldea
 
-Android 10 及以上版本登录成功后，响应文件保存到：
+登录成功后，响应文件保存到：
 
 ```text
-/storage/emulated/0/Download/cleat-fgo/chaldea-login.json
+/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod/exports/chaldea-login.json
 ```
 
-在 Chaldea 中选择该文件导入从者和素材数据。详见 [Chaldea 导入指南](https://docs.chaldea.center/zh/guide/import_https/)。每次成功登录会更新这个文件。
+用支持 Shizuku 的文件管理器复制该文件，再在 Chaldea 中选择导入从者和素材数据。详见 [Chaldea 导入指南](https://docs.chaldea.center/zh/guide/import_https/)。每次成功登录会更新这个文件。
 
 ## 配置
 

@@ -224,6 +224,7 @@ fn download_from(
             }
         }
     }
+    crate::storage::allow_file_access(&file).map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())?;
     drop(file);
     if !file_matches(&partial, size, sha256)? {

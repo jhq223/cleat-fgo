@@ -78,7 +78,7 @@ pub fn check(client: &Client, base: &Path, download: bool) -> Result<(), String>
     if !manifest.newer_than(crate::android::version_code()?, env!("CARGO_PKG_VERSION"))? {
         return Ok(());
     }
-    crate::update::atomic_write(
+    crate::storage::atomic_write(
         &base.join("updates/available.json"),
         &serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
     )?;
@@ -100,7 +100,7 @@ pub fn check(client: &Client, base: &Path, download: bool) -> Result<(), String>
     crate::android::validate_apk(&path, manifest.version_code)?;
     if !marker.exists() {
         crate::android::notify_apk(&path, manifest.size)?;
-        crate::update::atomic_write(&marker, b"1")?;
+        crate::storage::atomic_write(&marker, b"1")?;
     }
     log::info!("verified APK ready: {}", path.display());
     Ok(())

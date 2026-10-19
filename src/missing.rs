@@ -22,6 +22,9 @@ impl Missing {
                 let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
                     return;
                 };
+                if let Err(error) = crate::storage::allow_file_access(&file) {
+                    log::warn!("missing text permissions: {error}");
+                }
                 let mut bytes = file.metadata().map(|m| m.len()).unwrap_or(0);
                 for text in rx {
                     if bytes > 8 * 1024 * 1024 {

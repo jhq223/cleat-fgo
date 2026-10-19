@@ -4,6 +4,7 @@ use crate::{
     bundle::ScriptBundle,
     data::{self, CATEGORIES},
     resources,
+    storage::{self, atomic_write},
 };
 use reqwest::{Url, blocking::Client, header::ETAG};
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{Read, Write},
+    io::Read,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -319,6 +320,7 @@ fn update_pack(client: &Client, base: &Path, manifest_url: &str) -> UpdateResult
     }
     fs::create_dir_all(&packs).map_err(|e| e.to_string())?;
     let staging = tempfile::tempdir_in(&packs).map_err(|e| e.to_string())?;
+    storage::allow_group_access(staging.path()).map_err(|e| e.to_string())?;
     let blobs = cache.join("blobs");
     fs::create_dir_all(&blobs).map_err(|e| e.to_string())?;
     for file in &manifest.files {
@@ -407,16 +409,6 @@ pub(crate) fn limited(
     }
     Ok(bytes)
 }
-pub fn atomic_write(path: &Path, bytes: &[u8]) -> UpdateResult<()> {
-    let parent = path.parent().ok_or("file has no parent")?;
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    file.write_all(bytes)
-        .and_then(|()| file.as_file().sync_all())
-        .map_err(|e| e.to_string())?;
-    file.persist(path).map_err(|e| e.to_string())?;
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,13 +442,5 @@ mod tests {
             })
             .is_ok()
         );
-    }
-    #[test]
-    fn atomic_replacement_keeps_final_file_complete() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("state");
-        atomic_write(&path, b"old").unwrap();
-        atomic_write(&path, b"new").unwrap();
-        assert_eq!(fs::read(path).unwrap(), b"new");
     }
 }

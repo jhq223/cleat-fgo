@@ -18,6 +18,7 @@ mod missing;
 mod network;
 mod obscured;
 mod resources;
+mod storage;
 mod update;
 
 pub(crate) struct AppContext {
@@ -42,6 +43,7 @@ fn main() -> cleat::Result<()> {
     let base =
         PathBuf::from("/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod");
     fs::create_dir_all(&base).map_err(|e| cleat::Error::Bridge(e.to_string()))?;
+    storage::repair_permissions(&base);
     let config = update::Config::load(&base);
     let missing = missing::Missing::new(&base, config.record_missing);
     let resources = ArcSwap::from_pointee(resources::Resources::default());
@@ -72,9 +74,9 @@ fn main() -> cleat::Result<()> {
             "System",
         ] {
             if let Some(assembly) = cleat::bridge::api::cache::assembly(name) {
-                let _ = fs::write(
-                    APP.get().unwrap().base.join(format!("debug-{name}.cs")),
-                    assembly.to_string(),
+                let _ = storage::atomic_write(
+                    &APP.get().unwrap().base.join(format!("debug-{name}.cs")),
+                    assembly.to_string().as_bytes(),
                 );
             }
         }

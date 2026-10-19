@@ -18,13 +18,13 @@ Open the APK from the Android download notification when it is ready. Restart th
 
 ## Import into Chaldea
 
-On Android 10 and later, a successful login saves the response to:
+After a successful login, the response is saved to:
 
 ```text
-/storage/emulated/0/Download/cleat-fgo/chaldea-login.json
+/storage/emulated/0/Android/data/com.aniplex.fategrandorder/files/Mod/exports/chaldea-login.json
 ```
 
-Select this file in Chaldea to import servant and material data. See the [Chaldea import guide](https://docs.chaldea.center/guide/import_https/). Each successful login updates the file.
+Copy the file with a Shizuku-enabled file manager, then select it in Chaldea to import servant and material data. See the [Chaldea import guide](https://docs.chaldea.center/guide/import_https/). Each successful login updates the file.
 
 ## Configuration
 

@@ -8,9 +8,6 @@ use cleat::android::{
 };
 use std::path::Path;
 
-mod downloads;
-pub use downloads::export_login;
-
 fn context<'a>(env: &mut Env<'a>) -> jni::errors::Result<JObject<'a>> {
     env.call_static_method(
         jni_str!("android/app/ActivityThread"),

@@ -2,7 +2,7 @@
 
 ## 0.2.3
 
-- 登录响应通过 Android 下载文件接口保存到 `Download/cleat-fgo/chaldea-login.json`，可由文件管理器读取并在 Chaldea 中选择导入。
+- 修复 Mod 文件权限，支持通过 Shizuku 读取、复制和修改登录导出、配置及翻译资源。启动时自动修复已有文件。
 
 ## 0.2.2
 
