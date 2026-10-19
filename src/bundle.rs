@@ -1,201 +1,317 @@
-//! TextBundle parser — reads `.script` bundle files (FGO script text).
-//!
-//! ## Binary format
-//!
-//! ```text
-//! ┌─ Header (Big Endian)
-//! │   magic:      i32 = 0x7A684244
-//! │   file_count: i32
-//! ├─ File entries × file_count
-//! │   index:  u32   (byte offset to encrypted data)
-//! │   id:     1-byte length + UTF-8 bytes
-//! │   size:   u32   (encrypted data length)
-//! │   crc:    u32
-//! └─ Data section (per entry)
-//!     encrypted → AES-256-CBC → zlib → UTF-16LE text
-//! ```
-//!
-//! ## Crypto
-//!
-//! Rijndael-256 (32-byte block, 32-byte key), CBC mode, PKCS7 padding,
-//! then zlib-compressed.
-
-use std::collections::HashMap;
-use std::fs;
-use std::io::{Cursor, Read};
-use std::path::Path;
-
+//! TextBundle (.script) reader compatible with cleat-fgo-helper.
+//! Rijndael uses a 256-bit block; this format is not AES.
 use flate2::read::ZlibDecoder;
-use simple_rijndael::impls::RijndaelCbc;
-use simple_rijndael::paddings::Pkcs7Padding;
+use simple_rijndael::{
+    impls::RijndaelCbc,
+    paddings::{Padding, Pkcs7Padding},
+};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{Cursor, Read},
+    path::Path,
+};
 
-const MAGIC: i32 = 0x7A684244;
+const MAGIC: u32 = 0x7a684244;
 const KEY: &[u8; 32] = b"mYq3t6v9y$B&E)H@McQfTjWnZr4u7x!z";
 const IV: &[u8; 32] = b"TjWnZr4u7x!A%D*G-KaNdRgUkXp2s5v8";
+pub const MAX_BUNDLE: u64 = 128 * 1024 * 1024;
+pub const MAX_ENTRY: u64 = 8 * 1024 * 1024;
+const MAX_TEXT: usize = 256 * 1024 * 1024;
 
-// ── Public API ──────────────────────────────────────────────────────────
+struct CheckedPadding(usize);
+impl Padding for CheckedPadding {
+    fn new(size: usize) -> Self {
+        Self(size)
+    }
+    fn size(&self) -> usize {
+        self.0
+    }
+    fn encode(&self, data: Vec<u8>) -> Vec<u8> {
+        Pkcs7Padding::new(self.0).encode(data)
+    }
+    fn decode(&self, mut data: Vec<u8>) -> Result<Vec<u8>, simple_rijndael::Errors> {
+        let count = usize::from(
+            *data
+                .last()
+                .ok_or(simple_rijndael::Errors::InvalidDataSize)?,
+        );
+        if count == 0
+            || count > self.0
+            || count > data.len()
+            || !data.len().is_multiple_of(self.0)
+            || !data[data.len() - count..]
+                .iter()
+                .all(|b| usize::from(*b) == count)
+        {
+            return Err(simple_rijndael::Errors::InvalidDataSize);
+        }
+        data.truncate(data.len() - count);
+        Ok(data)
+    }
+}
 
-/// Loaded script entries: asset ID → plaintext content.
+#[derive(Default)]
 pub struct ScriptBundle {
     entries: HashMap<String, String>,
 }
-
 impl ScriptBundle {
-    /// Scan `dir` for `.script` files whose stem is a pure number (e.g.
-    /// `20260509.script`).  Only the file with the **largest** numeric name
-    /// is loaded — newer bundles supersede older ones.
-    pub fn load_dir(dir: &Path) -> Result<Self, String> {
-        let mut entries = HashMap::new();
-
-        let chosen = pick_newest(dir)?;
-        if let Some(path) = chosen {
-            log::info!("bundle: {}", path.display());
-            let data = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-            parse_one(&data, &mut entries)?;
+    pub fn load_dir(dir: &Path) -> Self {
+        let mut result = Self::default();
+        let Ok(files) = fs::read_dir(dir) else {
+            return result;
+        };
+        let mut files: Vec<_> = files
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "script"))
+            .collect();
+        files.sort_by_key(|p| {
+            (
+                p.file_stem()
+                    .and_then(|v| v.to_str())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0),
+                p.clone(),
+            )
+        });
+        for file in files {
+            let parsed = (|| {
+                if fs::metadata(&file).map_err(|e| e.to_string())?.len() > MAX_BUNDLE {
+                    return Err("bundle too large".into());
+                }
+                Self::parse(&fs::read(&file).map_err(|e| e.to_string())?)
+            })();
+            match parsed {
+                Ok(bundle) => {
+                    if let Err(e) = result.merge(bundle) {
+                        log::warn!("bundle: {}: {e}", file.display());
+                    }
+                }
+                Err(e) => log::warn!("bundle: {}: {e}", file.display()),
+            }
         }
-
-        log::info!("bundle: {} entries", entries.len());
-        Ok(Self { entries })
+        // Current community resources also publish individual UTF-16/UTF-8
+        // scripts. These override legacy bundles and keep local edits simple.
+        if let Ok(files) = fs::read_dir(dir.join("Script")) {
+            let mut plain = Self::default();
+            let mut total = 0usize;
+            let mut files: Vec<_> = files.flatten().map(|e| e.path()).collect();
+            files.sort();
+            for file in files {
+                let Some(id) = file
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .and_then(script_id)
+                else {
+                    continue;
+                };
+                let parsed = (|| {
+                    if fs::metadata(&file).map_err(|e| e.to_string())?.len() > MAX_ENTRY {
+                        return Err("script too large".into());
+                    }
+                    decode_script(&fs::read(&file).map_err(|e| e.to_string())?)
+                })();
+                match parsed {
+                    Ok(text) => {
+                        total += text.len();
+                        if total > MAX_TEXT {
+                            log::warn!("plain story text exceeds memory budget");
+                            break;
+                        }
+                        plain.entries.insert(id.to_owned(), text);
+                    }
+                    Err(e) => log::warn!("story {}: {e}", file.display()),
+                }
+            }
+            if let Err(e) = result.merge(plain) {
+                log::warn!("stories: {e}");
+            }
+        }
+        result
     }
-
-    /// Look up a script entry by its asset ID.
+    pub fn merge(&mut self, other: Self) -> Result<(), String> {
+        let added = other.entries.values().map(String::len).sum::<usize>();
+        let existing = self.entries.values().map(String::len).sum::<usize>();
+        let replaced = other
+            .entries
+            .keys()
+            .filter_map(|key| self.entries.get(key))
+            .map(String::len)
+            .sum::<usize>();
+        if added.saturating_add(existing - replaced) > MAX_TEXT {
+            return Err("combined story text exceeds memory budget".into());
+        }
+        self.entries.extend(other.entries);
+        Ok(())
+    }
     pub fn get(&self, id: &str) -> Option<&str> {
         self.entries.get(id).map(String::as_str)
     }
-
     pub fn len(&self) -> usize {
         self.entries.len()
     }
-
-    pub fn empty() -> Self {
-        Self {
-            entries: HashMap::new(),
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() as u64 > MAX_BUNDLE {
+            return Err("bundle too large".into());
         }
+        let mut cursor = Cursor::new(data);
+        if number(&mut cursor)? != MAGIC {
+            return Err("invalid TextBundle magic".into());
+        }
+        let count = number(&mut cursor)? as usize;
+        if count > 100_000 || count > data.len().saturating_sub(8) / 14 {
+            return Err("invalid TextBundle entry count".into());
+        }
+        let mut infos = Vec::with_capacity(count);
+        for _ in 0..count {
+            let offset = number(&mut cursor)? as usize;
+            let mut length = [0];
+            cursor.read_exact(&mut length).map_err(|e| e.to_string())?;
+            if length[0] == 0 {
+                return Err("empty story ID".into());
+            }
+            let mut id = vec![0; length[0] as usize];
+            cursor.read_exact(&mut id).map_err(|e| e.to_string())?;
+            let id = String::from_utf8(id).map_err(|e| e.to_string())?;
+            let size = number(&mut cursor)? as usize;
+            // Legacy writers use zero here. SHA-256 is checked by the updater;
+            // do not invent a checksum interpretation for older bundles.
+            let _reserved_crc = number(&mut cursor)?;
+            infos.push((id, offset, size));
+        }
+        let header_end = cursor.position() as usize;
+        let mut result = Self::default();
+        let mut total = 0usize;
+        for (id, start, size) in infos {
+            let end = start.checked_add(size).ok_or("entry offset overflow")?;
+            if start < header_end || size == 0 || !size.is_multiple_of(32) || end > data.len() {
+                return Err(format!("{id}: invalid encrypted entry bounds"));
+            }
+            let cipher = RijndaelCbc::<CheckedPadding>::new(KEY, 32)
+                .map_err(|e| format!("cipher: {e:?}"))?;
+            let decrypted = cipher
+                .decrypt(IV, data[start..end].to_vec())
+                .map_err(|e| format!("{id}: decrypt: {e:?}"))?;
+            let mut bytes = Vec::new();
+            ZlibDecoder::new(decrypted.as_slice())
+                .take(MAX_ENTRY + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MAX_ENTRY {
+                return Err(format!("{id}: expanded text exceeds limit"));
+            }
+            let text = decode_utf16le(&bytes)?;
+            total = total.checked_add(text.len()).ok_or("text size overflow")?;
+            if total > MAX_TEXT {
+                return Err("expanded bundle exceeds limit".into());
+            }
+            if result.entries.insert(id, text).is_some() {
+                return Err("duplicate story ID".into());
+            }
+        }
+        Ok(result)
     }
 }
-
-// ── Internals ───────────────────────────────────────────────────────────
-
-/// Scan directory for `.script` files with purely numeric stems.
-/// Returns the path with the largest numeric value, or `None` if none found.
-fn pick_newest(dir: &Path) -> Result<Option<std::path::PathBuf>, String> {
-    let read_dir = match fs::read_dir(dir) {
-        Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("read_dir: {e}")),
-    };
-
-    let mut best: Option<(u64, std::path::PathBuf)> = None;
-    for entry in read_dir {
-        let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("script") {
-            continue;
-        }
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s,
-            None => continue,
-        };
-        let num: u64 = match stem.parse() {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        match &best {
-            Some((prev, _)) if num <= *prev => {}
-            _ => best = Some((num, path)),
-        }
-    }
-
-    Ok(best.map(|(_, p)| p))
+pub fn script_id(name: &str) -> Option<&str> {
+    let id = name.strip_suffix(".txt").unwrap_or(name);
+    ((9..=10).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())).then_some(id)
 }
-
-/// Bundle content is UTF-16LE (Il2CppString internal encoding).
-fn decode_utf16le(data: &[u8]) -> Result<String, String> {
-    if !data.len().is_multiple_of(2) {
-        return Err("odd byte length for UTF-16".into());
+pub fn decode_script(bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() as u64 > MAX_ENTRY {
+        return Err("script exceeds size limit".into());
     }
-    let u16s: Vec<u16> = data
-        .chunks_exact(2)
+    let text = decode_text(bytes)?;
+    if !text.trim_start().starts_with(['＄', '$'])
+        && !text.trim_start().starts_with("[soundStopAll]")
+    {
+        return Err("script is missing its scenario header".into());
+    }
+    Ok(text)
+}
+pub fn decode_text(bytes: &[u8]) -> Result<String, String> {
+    if bytes.starts_with(&[0xff, 0xfe]) || bytes.iter().take(100).any(|b| *b == 0) {
+        decode_utf16le(bytes)
+    } else {
+        String::from_utf8(
+            bytes
+                .strip_prefix(&[0xef, 0xbb, 0xbf])
+                .unwrap_or(bytes)
+                .to_vec(),
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+fn number(cursor: &mut Cursor<&[u8]>) -> Result<u32, String> {
+    let mut bytes = [0; 4];
+    cursor.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+    Ok(u32::from_be_bytes(bytes))
+}
+pub fn decode_utf16le(bytes: &[u8]) -> Result<String, String> {
+    if !bytes.len().is_multiple_of(2) {
+        return Err("odd UTF-16 byte count".into());
+    }
+    let bytes = bytes.strip_prefix(&[0xff, 0xfe]).unwrap_or(bytes);
+    let words: Vec<_> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
-    String::from_utf16(&u16s).map_err(|e| format!("utf-16: {e:?}"))
+    String::from_utf16(&words).map_err(|e| e.to_string())
 }
 
-fn parse_one(data: &[u8], out: &mut HashMap<String, String>) -> Result<u32, String> {
-    let mut cur = Cursor::new(data);
-
-    // Header
-    let mut buf = [0u8; 4];
-    cur.read_exact(&mut buf)
-        .map_err(|e| format!("magic: {e}"))?;
-    if i32::from_be_bytes(buf) != MAGIC {
-        return Err(format!("bad magic: 0x{:08X}", i32::from_be_bytes(buf)));
-    }
-
-    cur.read_exact(&mut buf)
-        .map_err(|e| format!("count: {e}"))?;
-    let file_count = i32::from_be_bytes(buf) as usize;
-
-    // File info entries
-    struct Info {
-        index: u32,
-        id: String,
-        size: u32,
-    }
-
-    let mut infos = Vec::with_capacity(file_count);
-    for _ in 0..file_count {
-        cur.read_exact(&mut buf)
-            .map_err(|e| format!("index: {e}"))?;
-        let index = u32::from_be_bytes(buf);
-
-        let mut len_buf = [0u8];
-        cur.read_exact(&mut len_buf)
-            .map_err(|e| format!("id len: {e}"))?;
-        let id_len = len_buf[0] as usize;
-        let mut id_bytes = vec![0u8; id_len];
-        cur.read_exact(&mut id_bytes)
-            .map_err(|e| format!("id: {e}"))?;
-        let id = String::from_utf8(id_bytes).map_err(|e| format!("id utf-8: {e}"))?;
-
-        cur.read_exact(&mut buf).map_err(|e| format!("size: {e}"))?;
-        let size = u32::from_be_bytes(buf);
-
-        // crc — read but unused
-        cur.read_exact(&mut buf).map_err(|e| format!("crc: {e}"))?;
-
-        infos.push(Info { index, id, size });
-    }
-
-    // Decrypt + decompress each entry
-    let mut loaded = 0u32;
-    for info in &infos {
-        let start = info.index as usize;
-        let end = start + info.size as usize;
-        if end > data.len() {
-            log::warn!("bundle: {} — size {end} exceeds file", info.id);
-            continue;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    fn bundle(text: &str) -> Vec<u8> {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        for word in text.encode_utf16() {
+            encoder.write_all(&word.to_le_bytes()).unwrap();
         }
-
-        // Fresh cipher per entry (CBC mode has internal state).
-        let cipher = RijndaelCbc::<Pkcs7Padding>::new(KEY, 32)
-            .map_err(|e| format!("rijndael init: {e:?}"))?;
-
-        let decrypted = cipher
-            .decrypt(IV, data[start..end].to_vec())
-            .map_err(|e| format!("{}: decrypt: {e:?}", info.id))?;
-
-        let mut decompressed = Vec::new();
-        ZlibDecoder::new(&decrypted[..])
-            .read_to_end(&mut decompressed)
-            .map_err(|e| format!("{}: zlib: {e}", info.id))?;
-
-        // Bundle content is UTF-16LE (Il2CppString internal encoding).
-        let plain = decode_utf16le(&decompressed).map_err(|e| format!("{}: {e}", info.id))?;
-
-        out.insert(info.id.clone(), plain);
-        loaded += 1;
+        let compressed = encoder.finish().unwrap();
+        let cipher = RijndaelCbc::<Pkcs7Padding>::new(KEY, 32).unwrap();
+        let bytes = cipher.encrypt(IV, compressed).unwrap();
+        let mut file = Vec::new();
+        file.extend(MAGIC.to_be_bytes());
+        file.extend(1u32.to_be_bytes());
+        file.extend(24u32.to_be_bytes());
+        file.push(3);
+        file.extend(b"001");
+        file.extend((bytes.len() as u32).to_be_bytes());
+        file.extend(0u32.to_be_bytes());
+        file.extend(bytes);
+        file
     }
-
-    Ok(loaded)
+    #[test]
+    fn roundtrip_and_reject_corrupt_bundles() {
+        let good = bundle("中文剧情\n😀[r]");
+        assert_eq!(
+            ScriptBundle::parse(&good).unwrap().get("001"),
+            Some("中文剧情\n😀[r]")
+        );
+        for end in 0..good.len() {
+            assert!(ScriptBundle::parse(&good[..end]).is_err());
+        }
+        let mut bad = good.clone();
+        bad[4..8].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(ScriptBundle::parse(&bad).is_err());
+        let mut bad = good;
+        bad[8..12].copy_from_slice(&0u32.to_be_bytes());
+        assert!(ScriptBundle::parse(&bad).is_err());
+        assert!(decode_utf16le(&[1]).is_err());
+    }
+    #[test]
+    fn merges_chapters_and_newer_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("20260101.script"), bundle("旧译文")).unwrap();
+        fs::write(dir.path().join("20261019.script"), bundle("新译文")).unwrap();
+        fs::write(dir.path().join("broken.script"), b"bad").unwrap();
+        assert_eq!(
+            ScriptBundle::load_dir(dir.path()).get("001"),
+            Some("新译文")
+        );
+    }
 }

@@ -1,0 +1,48 @@
+name: Build module release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cleat-fgo
+      - uses: actions/checkout@v4
+        with:
+          repository: jhq223/cleat
+          ref: v0.3.1
+          path: cleat
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: android-actions/setup-android@v3
+      - name: Build ARM64 library
+        working-directory: cleat-fgo
+        run: |
+          sdkmanager 'ndk;27.0.12077973'
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          cargo install cargo-ndk --locked
+          cargo ndk -t arm64-v8a build --release --locked
+          mkdir dist
+          cp target/aarch64-linux-android/release/libcleat_fgo.so dist/
+          cd dist
+          zip ../lib.zip libcleat_fgo.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: module-arm64
+          path: cleat-fgo/lib.zip
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: cleat-fgo/lib.zip
+          generate_release_notes: true
+          make_latest: true

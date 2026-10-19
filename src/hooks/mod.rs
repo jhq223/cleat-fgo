@@ -1,37 +1,41 @@
-mod assetbundle_keys;
 mod classname;
 mod font;
 mod localization;
+mod login;
+mod main_thread;
 mod masterdata;
+mod performance;
 mod script;
+mod text;
 
-use assetbundle_keys::set_assetbundle_keys_hook;
-use classname::classname_hook;
-use font::font_hook;
-use localization::localization_hook;
-use masterdata::masterdata_hook;
-use script::script_hook;
-
-pub fn install() -> cleat::Result<()> {
-    macro_rules! install {
-        ($hook:ident) => {
-            match $hook::install() {
-                Ok(()) => log::info!("  ✓ {}", stringify!($hook)),
-                Err(e) => {
-                    log::error!("  ✗ {}: {e}", stringify!($hook));
-                    return Err(e);
-                }
+pub fn install() {
+    type Installer = fn() -> cleat::Result<()>;
+    let hooks: &[(&str, Installer)] = &[
+        ("story", script::script_hook::install),
+        ("main thread", main_thread::update::install),
+        ("Chaldea login export", login::response_text::install),
+        ("NGUI text", text::ngui::install),
+        ("uGUI text", text::ugui::install),
+        ("TMP text", text::tmp::install),
+        ("Chinese font", font::font_hook::install),
+        ("localization", localization::localization_hook::install),
+        ("localization lookup", localization::get::install),
+        ("master data", masterdata::masterdata_hook::install),
+        ("class names", classname::classname_hook::install),
+        ("60 FPS", performance::frame_rate::install),
+    ];
+    let mut installed = 0;
+    for (name, install) in hooks {
+        match install() {
+            Ok(()) => {
+                installed += 1;
+                log::info!("hook installed: {name}");
             }
-        };
+            Err(cleat::Error::ClassNotFound(_)) if *name == "TMP text" => {
+                log::info!("TMP text: this game does not include TextMeshPro");
+            }
+            Err(error) => log::warn!("hook unavailable: {name}: {error}"),
+        }
     }
-
-    install!(script_hook);
-    install!(font_hook);
-    install!(localization_hook);
-    install!(masterdata_hook);
-    install!(classname_hook);
-    install!(set_assetbundle_keys_hook);
-
-    log::info!("all hooks installed");
-    Ok(())
+    log::info!("hooks: {installed}/{} installed", hooks.len());
 }
