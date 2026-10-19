@@ -40,14 +40,14 @@ pub fn response_text(this: &Object) -> Result<Il2CppString> {
         let path = app.base.join("exports/chaldea-login.json");
         std::thread::spawn(move || {
             for body in receiver {
-                match validate_response(&body).and_then(|()| atomic_write(&path, body.as_bytes())) {
+                match validate_response(&body).and_then(|()| save_response(&path, &body)) {
                     Ok(()) => log::info!(
                         "Chaldea login response saved: {} ({} bytes)",
                         path.display(),
                         body.len()
                     ),
                     Err(error) => {
-                        log::warn!("Chaldea login export: {error}; previous export preserved")
+                        log::warn!("Chaldea login export: {error}")
                     }
                 }
             }
@@ -58,6 +58,15 @@ pub fn response_text(this: &Object) -> Result<Il2CppString> {
         log::warn!("Chaldea login export is busy; this response was not queued");
     }
     Ok(response)
+}
+
+fn save_response(path: &std::path::Path, body: &str) -> std::result::Result<(), String> {
+    atomic_write(path, body.as_bytes())?;
+    #[cfg(target_os = "android")]
+    if crate::android::export_login(body.as_bytes())? {
+        log::info!("Chaldea export available: Download/cleat-fgo/chaldea-login.json");
+    }
+    Ok(())
 }
 
 fn decode_body(body: String) -> Option<String> {

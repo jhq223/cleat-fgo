@@ -1,5 +1,9 @@
 # 修改历史
 
+## 0.2.3
+
+- 登录响应通过 Android 下载文件接口保存到 `Download/cleat-fgo/chaldea-login.json`，可由文件管理器读取并在 Chaldea 中选择导入。
+
 ## 0.2.2
 
 - 剧情资源和 APK 支持分段续传，下载中断后继续已有进度。
