@@ -328,16 +328,11 @@ fn update_pack(client: &Client, base: &Path, manifest_url: &str) -> UpdateResult
             Ok(bytes) if verify_blob(file, &bytes).is_ok() => bytes,
             _ => {
                 log::info!("downloading resource: {} ({} bytes)", file.name, file.size);
-                let bytes = crate::network::bytes(
-                    client,
-                    &file.url,
-                    file.size,
-                    Duration::from_secs(15 * 60),
-                )
-                .map_err(|error| format!("{}: {error}", file.name))?;
+                crate::network::download(client, &file.url, &blob, file.size, &digest)
+                    .map_err(|error| format!("{}: {error}", file.name))?;
+                let bytes = fs::read(&blob).map_err(|e| e.to_string())?;
                 verify_blob(file, &bytes)?;
                 validate_resource(&file.name, &bytes)?;
-                atomic_write(&blob, &bytes)?;
                 bytes
             }
         };

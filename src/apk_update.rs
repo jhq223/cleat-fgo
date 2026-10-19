@@ -2,10 +2,11 @@
 #[cfg(target_os = "android")]
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
-#[cfg(target_os = "android")]
-use std::io::{Seek, Write};
-use std::{fs, io::Read, path::Path};
+#[cfg(test)]
+use std::fs;
+use std::path::Path;
 
 #[cfg(target_os = "android")]
 const RELEASE_API: &str = "https://api.github.com/repos/jhq223/cleat-fgo-build/releases/latest";
@@ -126,60 +127,12 @@ fn manifest_url(release: &serde_json::Value) -> Option<&str> {
 }
 
 fn file_matches(path: &Path, manifest: &ApkManifest) -> Result<bool, String> {
-    let Ok(mut file) = fs::File::open(path) else {
-        return Ok(false);
-    };
-    if file.metadata().map_err(|e| e.to_string())?.len() != manifest.size {
-        return Ok(false);
-    }
-    let mut digest = Sha256::new();
-    let mut buffer = [0; 64 * 1024];
-    loop {
-        let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    Ok(hex::encode(digest.finalize()).eq_ignore_ascii_case(&manifest.sha256))
+    crate::network::file_matches(path, manifest.size, &manifest.sha256)
 }
 
 #[cfg(target_os = "android")]
 fn download_apk(client: &Client, path: &Path, manifest: &ApkManifest) -> Result<(), String> {
-    let parent = path.parent().ok_or("missing APK directory")?;
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let mut staging = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    crate::network::with_response(
-        client,
-        &manifest.url,
-        None,
-        std::time::Duration::from_secs(15 * 60),
-        |response| {
-            staging
-                .as_file_mut()
-                .set_len(0)
-                .map_err(|e| e.to_string())?;
-            staging.as_file_mut().rewind().map_err(|e| e.to_string())?;
-            if response
-                .content_length()
-                .is_some_and(|len| len != manifest.size)
-            {
-                return Err("APK response size mismatch".into());
-            }
-            let count = std::io::copy(&mut response.take(manifest.size + 1), &mut staging)
-                .map_err(|e| e.to_string())?;
-            staging
-                .flush()
-                .and_then(|()| staging.as_file().sync_all())
-                .map_err(|e| e.to_string())?;
-            if count != manifest.size || !file_matches(staging.path(), manifest)? {
-                return Err("APK checksum/size mismatch; update discarded".into());
-            }
-            Ok(())
-        },
-    )?;
-    staging.persist(path).map_err(|e| e.to_string())?;
-    Ok(())
+    crate::network::download(client, &manifest.url, path, manifest.size, &manifest.sha256)
 }
 
 #[cfg(test)]

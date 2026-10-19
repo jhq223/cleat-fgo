@@ -25,6 +25,9 @@ jobs:
         with:
           targets: aarch64-linux-android
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - name: Build ARM64 library
         working-directory: cleat-fgo
         run: |

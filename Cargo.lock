@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "cleat-fgo"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arc-swap",
  "base64 0.22.1",
@@ -920,7 +920,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oslog"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80d2043d1f61d77cb2f4b1f7b7b2295f40507f5f8e9d1c8bf10a1ca5f97a3969"
 dependencies = [
